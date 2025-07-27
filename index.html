@@ -1,0 +1,800 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>3D Interactive Viewfinder Tool - Updated</title>
+    <style>
+        :root {
+            --ui-bg: rgba(45, 45, 55, 0.7);
+            --ui-border: rgba(180, 180, 200, 0.6);
+            --ui-text: #E0E0E5;
+            --accent-color: #6c9ce6;
+            --highlight-bg: rgba(108, 156, 230, 0.25);
+        }
+
+        body {
+            margin: 0;
+            overflow: hidden;
+            font-family: 'Segoe UI', 'Roboto', 'Helvetica Neue', sans-serif;
+            color: var(--ui-text);
+            background-color: #2a2a30;
+        }
+
+        canvas {
+            display: block;
+        }
+        
+        #lens-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: transparent;
+            pointer-events: none;
+            z-index: 99;
+            transition: background-color 0.4s ease;
+        }
+
+        .ui-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            display: grid;
+            grid-template-areas:
+                "left top-right"
+                "left ."
+                "bottom bottom";
+            grid-template-columns: 280px 1fr;
+            grid-template-rows: auto 1fr auto;
+            padding: 24px;
+            box-sizing: border-box;
+            gap: 16px;
+            z-index: 100;
+        }
+
+        .left-controls {
+            grid-area: left;
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+            pointer-events: all;
+            overflow-y: auto;
+        }
+
+        .ui-panel {
+            background-color: var(--ui-bg);
+            border: 1px solid var(--ui-border);
+            border-radius: 8px;
+            padding: 16px;
+            backdrop-filter: blur(5px);
+        }
+
+        .ui-panel h3 {
+            margin-top: 0;
+            margin-bottom: 12px;
+            font-weight: 500;
+            border-bottom: 1px solid var(--ui-border);
+            padding-bottom: 8px;
+            cursor: pointer;
+            position: relative;
+            display: flex;
+            align-items: center;
+        }
+
+        .ui-panel h3::after {
+            content: '▾';
+            position: absolute;
+            right: 5px;
+            font-size: 1.2em;
+            transition: transform 0.3s ease-out;
+        }
+
+        .ui-panel:not(.active) h3::after {
+             transform: rotate(-90deg);
+        }
+        
+        .panel-content {
+            list-style: none;
+            padding: 0;
+            margin: 0;
+            overflow: hidden;
+            max-height: 500px; 
+            transition: all 0.4s ease-out;
+        }
+        
+        .ui-panel:not(.active) .panel-content {
+            max-height: 0;
+            margin-top: 0 !important;
+            padding-top: 0 !important;
+            padding-bottom: 0 !important;
+        }
+
+        .level-selector .panel-content, .media-filters .panel-content, .vision-filters .panel-content {
+            margin-top: 8px;
+        }
+
+        .level-selector li, .vision-filters li {
+            padding: 10px 12px;
+            border-radius: 4px;
+            cursor: pointer;
+            transition: background-color 0.2s, opacity 0.3s;
+            display: flex;
+            align-items: center;
+        }
+
+        .level-selector li:hover, .vision-filters li:hover {
+            background-color: var(--highlight-bg);
+        }
+
+        .level-selector li.active, .vision-filters li.active {
+            background-color: var(--accent-color);
+            color: #fff;
+            font-weight: 500;
+        }
+
+        .media-filters li {
+            display: flex;
+            align-items: center;
+            padding: 8px 0;
+        }
+        
+        .media-filters input {
+            margin-right: 12px;
+            width: 18px;
+            height: 18px;
+            cursor: pointer;
+        }
+        
+        .color-swatch {
+            width: 14px;
+            height: 14px;
+            border-radius: 4px;
+            margin-right: 10px;
+            border: 1px solid rgba(255,255,255,0.3);
+        }
+        
+        .top-right-controls {
+            grid-area: top-right;
+            display: flex;
+            justify-content: flex-end;
+            align-items: center;
+            gap: 16px;
+            pointer-events: all;
+        }
+        
+        .view-indicator {
+            font-size: 14px;
+            padding: 10px 16px;
+            background-color: var(--ui-bg);
+            border-radius: 6px;
+            border: 1px solid var(--ui-border);
+            cursor: pointer;
+            transition: background-color 0.2s;
+            white-space: nowrap;
+        }
+        
+        .view-indicator:hover {
+             background-color: var(--highlight-bg);
+        }
+        
+        .view-toggle {
+            display: flex;
+            background-color: var(--ui-bg);
+            border: 1px solid var(--ui-border);
+            border-radius: 6px;
+            overflow: hidden;
+            backdrop-filter: blur(5px);
+        }
+
+        .btn {
+            padding: 10px 20px;
+            cursor: pointer;
+            transition: background-color 0.3s, color 0.3s;
+            border: none;
+            background-color: transparent;
+            color: var(--ui-text);
+            font-size: 16px;
+        }
+        
+        .btn.active {
+            background-color: var(--accent-color);
+            color: #fff;
+        }
+        
+        .bottom-controls {
+            grid-area: bottom;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            pointer-events: all;
+        }
+        
+        #time-panel {
+            width: 100%;
+            max-width: 960px;
+            margin: 0 auto;
+        }
+        
+        .panel-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            cursor: pointer;
+            border-bottom: 1px solid var(--ui-border);
+            padding-bottom: 8px;
+            margin-bottom: 12px;
+        }
+        
+        #time-panel:not(.active) .panel-header {
+            margin-bottom: 0;
+        }
+        
+        #time-panel h3 {
+            border-bottom: none;
+            margin-bottom: 0;
+            padding-bottom: 0;
+            cursor: default;
+        }
+        
+        #time-panel h3::after {
+            content: none;
+        }
+
+        .header-title-group {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+        }
+
+        .header-controls {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+        }
+
+        .chevron-toggle {
+            font-size: 1.2em;
+            transition: transform 0.3s ease-out;
+        }
+
+        #time-panel:not(.active) .chevron-toggle {
+            transform: rotate(-90deg);
+        }
+
+        #time-panel .panel-content {
+            padding-top: 0;
+        }
+
+        .age-by-selector {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            font-size: 14px;
+        }
+
+        .ui-select {
+            background-color: rgba(60, 60, 70, 0.8);
+            color: var(--ui-text);
+            border: 1px solid var(--ui-border);
+            border-radius: 4px;
+            padding: 5px 8px;
+            font-family: inherit;
+        }
+
+        .timelapse-btn {
+            padding: 5px 10px;
+            font-size: 14px;
+            background-color: rgba(80,80,90,0.7);
+            border-radius: 4px;
+        }
+
+        .timeline-container {
+            width: 100%;
+            display: flex;
+            align-items: center;
+            gap: 16px;
+            font-size: 14px;
+        }
+
+        .timeline-slider-wrapper {
+            position: relative;
+            width: 100%;
+            display: flex;
+            align-items: center;
+            height: 30px;
+        }
+        
+        .timeline-slider {
+            -webkit-appearance: none;
+            appearance: none;
+            width: 100%;
+            height: 3px;
+            background: var(--ui-border);
+            outline: none;
+            cursor: pointer;
+        }
+
+        .timeline-slider::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            appearance: none;
+            width: 20px;
+            height: 20px;
+            background: var(--ui-text);
+            border-radius: 50%;
+            border: 3px solid var(--accent-color);
+        }
+        
+        .timeline-markers {
+            position: absolute;
+            top: 50%;
+            left: 0;
+            width: 100%;
+            height: 1px;
+            pointer-events: none;
+        }
+
+        .marker {
+            position: absolute;
+            top: 50%;
+            transform: translate(-50%, -50%);
+            width: 10px;
+            height: 10px;
+            background-color: var(--ui-border);
+            border-radius: 50%;
+            cursor: pointer;
+            pointer-events: all;
+            transition: transform 0.2s;
+        }
+        
+        .marker:hover {
+            transform: translate(-50%, -50%) scale(1.5);
+            background-color: var(--accent-color);
+        }
+    </style>
+</head>
+<body>
+    <div id="lens-overlay"></div>
+    <div class="ui-overlay">
+        <div class="left-controls">
+            <div id="zoom-panel" class="ui-panel level-selector">
+                <h3>🔦 Focus on</h3>
+                <ul id="level-list" class="panel-content"></ul>
+            </div>
+            <div id="focus-panel" class="ui-panel media-filters">
+                <h3>🔎 Field of view</h3>
+                <ul id="media-filter-list" class="panel-content"></ul>
+            </div>
+            <div id="vision-panel" class="ui-panel vision-filters">
+                <h3>👓 Lens</h3>
+                <ul id="vision-filter-list" class="panel-content"></ul>
+            </div>
+        </div>
+        <div class="top-right-controls">
+            <div id="view-indicator" class="view-indicator"></div>
+            <div class="view-toggle">
+                <button id="btn-2d" class="btn">2D</button>
+                <button id="btn-3d" class="btn active">3D</button>
+            </div>
+        </div>
+        <div class="bottom-controls">
+            <div id="time-panel" class="ui-panel active">
+                <div class="panel-header">
+                    <div class="header-title-group">
+                        <h3>🕰️ Time</h3>
+                        <button id="timelapse-btn" class="btn timelapse-btn">▶️ Time lapse</button>
+                    </div>
+                    <div class="header-controls">
+                        <div class="age-by-selector">
+                            <label for="age-select">Age by:</label>
+                            <select id="age-select" class="ui-select">
+                                <option selected>1 day</option>
+                                <option>7 days</option>
+                                <option>30 days</option>
+                                <option>3 months</option>
+                                <option>6 months</option>
+                                <option>1 year</option>
+                            </select>
+                        </div>
+                        <span class="chevron-toggle">▾</span>
+                    </div>
+                </div>
+                <div class="panel-content">
+                    <div class="timeline-container">
+                        <span>Past</span>
+                        <div class="timeline-slider-wrapper">
+                            <input type="range" min="0" max="100" value="100" class="timeline-slider" id="time-slider">
+                            <div class="timeline-markers" id="timeline-markers"></div>
+                        </div>
+                        <span>Today</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+                "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/",
+                "tween": "https://cdn.jsdelivr.net/npm/@tweenjs/tween.js@23.1.1/dist/tween.esm.js"
+            }
+        }
+    </script>
+    <script type="module">
+        import * as THREE from 'three';
+        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+        import * as TWEEN from 'tween';
+
+        let scene, observerCamera, renderer, controls, viewfinderCamera, viewfinderHelper, viewfinderControls;
+        let levels = [];
+        let exteriorShell, groundPlane, viewIndicator, lensOverlay;
+        let activeLevelIndex = -1;
+        let activeLensKey = 'clear';
+        let isObserverView = true;
+        let is3DView = true;
+        let timelapseInterval = null;
+        
+        const mediaTypes = {
+            photos: { label: "Photos", color: 0xff5555 },
+            videos: { label: "Videos", color: 0x55ff55 },
+            panos:  { label: "Panos",  color: 0xffaa00 },
+            walks:  { label: "Walks",  color: 0xff44cc }
+        };
+
+        const visionLenses = {
+            clear: { label: "Clear", color: null },
+            lens1: { label: "Lens 1", color: 0xff6666 },
+            lens2: { label: "Lens 2", color: 0x66ff66 },
+            lens3: { label: "Lens 3", color: 0x6666ff },
+            lens4: { label: "Lens 4", color: 0xffff66 },
+            lens5: { label: "Lens 5", color: 0xff66ff }
+        };
+
+        function initScene() {
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x2a2a30);
+
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            document.body.appendChild(renderer.domElement);
+
+            const buildingCenter = new THREE.Vector3(0, 8, 0);
+
+            observerCamera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 1000);
+            observerCamera.position.set(30, 25, 30);
+            
+            controls = new OrbitControls(observerCamera, renderer.domElement);
+            controls.target.copy(buildingCenter);
+            controls.enableDamping = true;
+
+            viewfinderCamera = new THREE.PerspectiveCamera(50, 16 / 9, 1, 35);
+            viewfinderCamera.position.set(-20, 15, -20);
+            viewfinderCamera.lookAt(buildingCenter);
+
+            viewfinderHelper = new THREE.CameraHelper(viewfinderCamera);
+            scene.add(viewfinderHelper);
+            
+            viewfinderControls = new OrbitControls(viewfinderCamera, renderer.domElement);
+            viewfinderControls.target.copy(buildingCenter);
+            viewfinderControls.enableDamping = true;
+            viewfinderControls.enabled = false; 
+
+            const ambientLight = new THREE.AmbientLight(0xffffff, 0.7);
+            scene.add(ambientLight);
+            const directionalLight = new THREE.DirectionalLight(0xffffff, 0.9);
+            directionalLight.position.set(25, 30, 20);
+            scene.add(directionalLight);
+            
+            const gridHelper = new THREE.GridHelper(100, 100, 0x555555, 0x444444);
+            scene.add(gridHelper);
+            
+            viewIndicator = document.getElementById('view-indicator');
+            lensOverlay = document.getElementById('lens-overlay');
+            
+            createBuilding(8, 2);
+            setupUI();
+            
+            window.addEventListener('keydown', handleKeyPress);
+            viewIndicator.addEventListener('click', toggleViewMode);
+            
+            handleViewSwitch(true, true); 
+            updateLevelSelection(-1);
+            updateViewIndicator();
+            updateLensSelection('clear');
+            
+            animate();
+        }
+
+        function createBuilding(count, spacing) {
+            const slabGeometry = new THREE.BoxGeometry(10, 1, 10);
+            const dotGeometry = new THREE.SphereGeometry(0.15, 16, 16);
+            const mediaKeys = Object.keys(mediaTypes);
+
+            for (let i = 0; i < count; i++) {
+                const slabMaterial = new THREE.MeshStandardMaterial({ color: 0x888888, transparent: true });
+                const slab = new THREE.Mesh(slabGeometry, slabMaterial);
+                slab.position.y = i * spacing;
+                slab.renderOrder = 1;
+                scene.add(slab);
+
+                const mediaDots = [];
+                for (let j = 0; j < 15; j++) {
+                    const mediaKey = mediaKeys[Math.floor(Math.random() * mediaKeys.length)];
+                    const dotMaterial = new THREE.MeshBasicMaterial({ color: mediaTypes[mediaKey].color, transparent: true });
+                    const dot = new THREE.Mesh(dotGeometry, dotMaterial);
+                    dot.position.set((Math.random() - 0.5) * 9, i * spacing + 0.55, (Math.random() - 0.5) * 9);
+                    dot.userData = { mediaType: mediaKey };
+                    dot.renderOrder = 2;
+                    mediaDots.push(dot);
+                    scene.add(dot);
+                }
+                levels.push({ slab, media: mediaDots });
+            }
+
+            const totalHeight = count * spacing;
+            const shellGeometry = new THREE.BoxGeometry(10.5, totalHeight, 10.5);
+            const shellMaterial = new THREE.MeshStandardMaterial({
+                color: 0xaaddff,
+                transparent: true,
+                opacity: 0.3,
+                side: THREE.FrontSide
+            });
+            exteriorShell = new THREE.Mesh(shellGeometry, shellMaterial);
+            exteriorShell.position.y = (totalHeight / 2) - (spacing / 2);
+            exteriorShell.renderOrder = 99;
+            scene.add(exteriorShell);
+            
+            const groundGeometry = new THREE.PlaneGeometry(30, 30);
+            const groundMaterial = new THREE.MeshStandardMaterial({
+                 color: 0x336633, 
+                 side: THREE.DoubleSide
+            });
+            groundPlane = new THREE.Mesh(groundGeometry, groundMaterial);
+            groundPlane.rotation.x = -Math.PI / 2;
+            groundPlane.position.y = -0.51;
+            scene.add(groundPlane);
+        }
+
+        function setupUI() {
+            document.querySelectorAll('.ui-panel:not(#time-panel) h3').forEach(header => {
+                header.addEventListener('click', () => {
+                    header.parentElement.classList.toggle('active');
+                });
+            });
+
+            document.querySelector('#time-panel .panel-header').addEventListener('click', (e) => {
+                // Do not toggle if the click was on the age selector or the timelapse button
+                if (e.target.closest('.age-by-selector') || e.target.closest('#timelapse-btn')) {
+                    return;
+                }
+                document.getElementById('time-panel').classList.toggle('active');
+            });
+
+
+            const levelList = document.getElementById('level-list');
+            const exteriorLi = document.createElement('li');
+            exteriorLi.textContent = `Exterior`;
+            exteriorLi.dataset.index = -1;
+            levelList.appendChild(exteriorLi);
+            levels.forEach((_, i) => {
+                const li = document.createElement('li');
+                li.textContent = `Level ${i + 1}`;
+                li.dataset.index = i;
+                levelList.appendChild(li);
+            });
+            levelList.addEventListener('click', (e) => {
+                if (e.target.tagName === 'LI') updateLevelSelection(parseInt(e.target.dataset.index));
+            });
+
+            const filterList = document.getElementById('media-filter-list');
+            for (const key in mediaTypes) {
+                const li = document.createElement('li');
+                const swatch = document.createElement('div');
+                swatch.className = 'color-swatch';
+                swatch.style.backgroundColor = `#${mediaTypes[key].color.toString(16).padStart(6,'0')}`;
+                li.innerHTML = `<input type="checkbox" id="filter-${key}" data-type="${key}" checked> ${swatch.outerHTML} <label for="filter-${key}">${mediaTypes[key].label}</label>`;
+                filterList.appendChild(li);
+            }
+            filterList.addEventListener('change', updateMediaVisibility);
+            
+            const visionList = document.getElementById('vision-filter-list');
+            for (const key in visionLenses) {
+                const li = document.createElement('li');
+                li.dataset.key = key;
+                const swatch = document.createElement('div');
+                swatch.className = 'color-swatch';
+                if (visionLenses[key].color) {
+                    swatch.style.backgroundColor = `#${visionLenses[key].color.toString(16).padStart(6,'0')}`;
+                } else {
+                     swatch.style.border = '1px solid #fff';
+                }
+                li.appendChild(swatch);
+                const label = document.createTextNode(visionLenses[key].label);
+                li.appendChild(label);
+                visionList.appendChild(li);
+            }
+            visionList.addEventListener('click', (e) => {
+                const li = e.target.closest('li');
+                if (li) updateLensSelection(li.dataset.key);
+            });
+
+            document.getElementById('btn-2d').addEventListener('click', () => handleViewSwitch(false));
+            document.getElementById('btn-3d').addEventListener('click', () => handleViewSwitch(true));
+            
+            const slider = document.getElementById('time-slider');
+            const markersContainer = document.getElementById('timeline-markers');
+            const markerPositions = [5, 12, 25, 30, 45, 50, 63, 70, 85, 95];
+            markerPositions.forEach(pos => {
+                const marker = document.createElement('div');
+                marker.className = 'marker';
+                marker.style.left = `${pos}%`;
+                marker.addEventListener('click', () => {
+                    stopTimelapse();
+                    slider.value = pos;
+                });
+                markersContainer.appendChild(marker);
+            });
+
+            const timelapseBtn = document.getElementById('timelapse-btn');
+            timelapseBtn.addEventListener('click', toggleTimelapse);
+            slider.addEventListener('input', stopTimelapse);
+        }
+
+        function toggleTimelapse() {
+            const timelapseBtn = document.getElementById('timelapse-btn');
+            if (timelapseInterval) {
+                stopTimelapse();
+            } else {
+                timelapseBtn.innerHTML = '⏹️ Stop';
+                const slider = document.getElementById('time-slider');
+                timelapseInterval = setInterval(() => {
+                    let currentValue = parseInt(slider.value);
+                    currentValue++;
+                    if (currentValue > 100) {
+                        currentValue = 0;
+                    }
+                    slider.value = currentValue;
+                }, 100); 
+            }
+        }
+
+        function stopTimelapse() {
+            if (timelapseInterval) {
+                clearInterval(timelapseInterval);
+                timelapseInterval = null;
+                document.getElementById('timelapse-btn').innerHTML = '▶️ Time lapse';
+            }
+        }
+        
+        function toggleViewMode() {
+            isObserverView = !isObserverView;
+            controls.enabled = isObserverView;
+            viewfinderControls.enabled = !isObserverView;
+            updateViewIndicator();
+        }
+
+        function handleKeyPress(event) {
+            if (event.key.toLowerCase() === 'c') toggleViewMode();
+        }
+        
+        function updateViewIndicator() {
+            viewIndicator.innerHTML = isObserverView 
+                ? '🎥 Switch to Camera view' 
+                : '👁️ Switch to Third person view';
+        }
+
+        function updateLevelSelection(selectedIndex) {
+            activeLevelIndex = selectedIndex;
+            const isExteriorView = activeLevelIndex === -1;
+            document.querySelectorAll('#level-list li').forEach(li => {
+                li.classList.toggle('active', parseInt(li.dataset.index) === activeLevelIndex);
+            });
+            exteriorShell.visible = isExteriorView;
+            groundPlane.visible = isExteriorView;
+            levels.forEach((level, i) => {
+                level.slab.visible = isExteriorView || (i === activeLevelIndex);
+            });
+            updateMediaVisibility();
+        }
+
+        function updateMediaVisibility() {
+            const visibleTypes = new Set();
+            document.querySelectorAll('#media-filter-list input:checked').forEach(input => {
+                visibleTypes.add(input.dataset.type);
+            });
+            const isExteriorView = activeLevelIndex === -1;
+            levels.forEach((level, i) => {
+                const isLevelVisible = isExteriorView || (i === activeLevelIndex);
+                level.media.forEach(dot => {
+                    dot.visible = isLevelVisible && visibleTypes.has(dot.userData.mediaType);
+                });
+            });
+        }
+        
+        function updateLensSelection(lensKey) {
+            if (activeLensKey === lensKey) return;
+            activeLensKey = lensKey;
+            
+            document.querySelectorAll('#vision-filter-list li').forEach(li => {
+                li.classList.toggle('active', li.dataset.key === activeLensKey);
+            });
+            
+            const lens = visionLenses[activeLensKey];
+            if (lens && lens.color) {
+                const color = new THREE.Color(lens.color);
+                lensOverlay.style.backgroundColor = `rgba(${color.r * 255}, ${color.g * 255}, ${color.b * 255}, 0.20)`;
+            } else {
+                lensOverlay.style.backgroundColor = 'transparent';
+            }
+        }
+
+        function handleViewSwitch(to3D, isInitialCall = false) {
+            if (is3DView === to3D && !isInitialCall) return;
+            is3DView = to3D;
+            document.getElementById('btn-3d').classList.toggle('active', is3DView);
+            document.getElementById('btn-2d').classList.toggle('active', !is3DView);
+            
+            if (isInitialCall) return;
+
+            const duration = 1200;
+            const targetPos = is3DView ? new THREE.Vector3(-20, 15, -20) : new THREE.Vector3(0, 30, 0.1);
+            
+            viewfinderCamera.up.set(0, 1, 0);
+
+            new TWEEN.Tween(viewfinderCamera.position)
+                .to(targetPos, duration)
+                .easing(TWEEN.Easing.Cubic.InOut)
+                .onUpdate(() => viewfinderCamera.lookAt(viewfinderControls.target))
+                .start();
+        }
+
+        function animate(time) {
+            requestAnimationFrame(animate);
+            TWEEN.update(time);
+
+            const canvas = renderer.domElement;
+            renderer.setScissorTest(false);
+            renderer.setViewport(0, 0, canvas.clientWidth, canvas.clientHeight);
+
+            if (isObserverView) {
+                controls.update();
+                renderer.render(scene, observerCamera);
+            } else {
+                viewfinderControls.update();
+                
+                const targetAspect = 16 / 9;
+                
+                let newWidth = canvas.clientWidth;
+                let newHeight = newWidth / targetAspect;
+
+                if (newHeight > canvas.clientHeight) {
+                    newHeight = canvas.clientHeight;
+                    newWidth = newHeight * targetAspect;
+                }
+                
+                const x = (canvas.clientWidth - newWidth) / 2;
+                const y = (canvas.clientHeight - newHeight) / 2;
+                
+                renderer.setScissorTest(true);
+                renderer.setViewport(x, y, newWidth, newHeight);
+                renderer.setScissor(x, y, newWidth, newHeight);
+                renderer.render(scene, viewfinderCamera);
+            }
+        }
+        
+        window.addEventListener('resize', () => {
+            observerCamera.aspect = window.innerWidth / window.innerHeight;
+            observerCamera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+
+        initScene();
+
+    </script>
+</body>
+</html>
