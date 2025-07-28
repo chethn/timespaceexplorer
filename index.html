@@ -25,6 +25,26 @@
             display: block;
         }
         
+        #label-container {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+        }
+
+        .label {
+            background-color: var(--ui-bg);
+            color: var(--ui-text);
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 14px;
+            pointer-events: auto;
+            cursor: pointer;
+            border: 1px solid var(--ui-border);
+        }
+
         #lens-overlay {
             position: absolute;
             top: 0;
@@ -358,6 +378,7 @@
     </style>
 </head>
 <body>
+    <div id="label-container"></div>
     <div id="lens-overlay"></div>
     <div class="ui-overlay">
         <div class="left-controls">
@@ -428,9 +449,10 @@
     <script type="module">
         import * as THREE from 'three';
         import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+        import { CSS2DRenderer, CSS2DObject } from 'three/addons/renderers/CSS2DRenderer.js';
         import * as TWEEN from 'tween';
 
-        let scene, observerCamera, renderer, controls, viewfinderCamera, viewfinderHelper, viewfinderControls;
+        let scene, observerCamera, renderer, labelRenderer, controls, viewfinderCamera, viewfinderHelper, viewfinderControls;
         let levels = [];
         let exteriorShell, groundPlane, viewIndicator, lensOverlay;
         let activeLevelIndex = -1;
@@ -438,12 +460,13 @@
         let isObserverView = true;
         let is3DView = true;
         let timelapseInterval = null;
+        let exteriorLabels = [];
         
-        const mediaTypes = {
-            photos: { label: "Photos", color: 0xff5555 },
-            videos: { label: "Videos", color: 0x55ff55 },
-            panos:  { label: "Panos",  color: 0xffaa00 },
-            walks:  { label: "Walks",  color: 0xff44cc }
+        const fieldOfViewItems = {
+            media: { label: "Media", color: 0x55ff55 },
+            liveCamera: { label: "Live camera", color: 0xff5555 },
+            people: { label: "People", color: 0xffaa00 },
+            objects: { label: "Objects", color: 0x55aaff }
         };
 
         const visionLenses = {
@@ -460,26 +483,34 @@
             scene.background = new THREE.Color(0x2a2a30);
 
             renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setPixelRatio(window.devicePixelRatio);
             renderer.setSize(window.innerWidth, window.innerHeight);
             document.body.appendChild(renderer.domElement);
+
+            labelRenderer = new CSS2DRenderer();
+            labelRenderer.setSize(window.innerWidth, window.innerHeight);
+            labelRenderer.domElement.style.position = 'absolute';
+            labelRenderer.domElement.style.top = '0px';
+            labelRenderer.domElement.style.pointerEvents = 'none'; // Let mouse events pass through to the canvas
+            document.getElementById('label-container').appendChild(labelRenderer.domElement);
 
             const buildingCenter = new THREE.Vector3(0, 8, 0);
 
             observerCamera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 1000);
             observerCamera.position.set(30, 25, 30);
             
-            controls = new OrbitControls(observerCamera, renderer.domElement);
+            controls = new OrbitControls(observerCamera, renderer.domElement); // Control events are on the main canvas
             controls.target.copy(buildingCenter);
             controls.enableDamping = true;
 
-            viewfinderCamera = new THREE.PerspectiveCamera(50, 16 / 9, 1, 35);
+            viewfinderCamera = new THREE.PerspectiveCamera(50, 16 / 9, 0.1, 1000); // Fixed far clipping plane
             viewfinderCamera.position.set(-20, 15, -20);
             viewfinderCamera.lookAt(buildingCenter);
 
             viewfinderHelper = new THREE.CameraHelper(viewfinderCamera);
             scene.add(viewfinderHelper);
             
-            viewfinderControls = new OrbitControls(viewfinderCamera, renderer.domElement);
+            viewfinderControls = new OrbitControls(viewfinderCamera, renderer.domElement); // Control events are on the main canvas
             viewfinderControls.target.copy(buildingCenter);
             viewfinderControls.enableDamping = true;
             viewfinderControls.enabled = false; 
@@ -510,30 +541,49 @@
             animate();
         }
 
+        function createLabel(text, position) {
+            const div = document.createElement('div');
+            div.className = 'label';
+            div.textContent = text;
+            const label = new CSS2DObject(div);
+            label.position.copy(position);
+            return label;
+        }
+
         function createBuilding(count, spacing) {
             const slabGeometry = new THREE.BoxGeometry(10, 1, 10);
             const dotGeometry = new THREE.SphereGeometry(0.15, 16, 16);
-            const mediaKeys = Object.keys(mediaTypes);
+            const fovKeys = Object.keys(fieldOfViewItems);
 
             for (let i = 0; i < count; i++) {
                 const slabMaterial = new THREE.MeshStandardMaterial({ color: 0x888888, transparent: true });
                 const slab = new THREE.Mesh(slabGeometry, slabMaterial);
-                slab.position.y = i * spacing;
+                const yPos = i * spacing;
+                slab.position.y = yPos;
                 slab.renderOrder = 1;
                 scene.add(slab);
 
                 const mediaDots = [];
-                for (let j = 0; j < 15; j++) {
-                    const mediaKey = mediaKeys[Math.floor(Math.random() * mediaKeys.length)];
-                    const dotMaterial = new THREE.MeshBasicMaterial({ color: mediaTypes[mediaKey].color, transparent: true });
+                for (let j = 0; j < 25; j++) { // Increased dot count for more variety
+                    const randomFovKey = fovKeys[Math.floor(Math.random() * fovKeys.length)];
+                    const fovItem = fieldOfViewItems[randomFovKey];
+                    
+                    const dotMaterial = new THREE.MeshBasicMaterial({ color: fovItem.color, transparent: true });
                     const dot = new THREE.Mesh(dotGeometry, dotMaterial);
-                    dot.position.set((Math.random() - 0.5) * 9, i * spacing + 0.55, (Math.random() - 0.5) * 9);
-                    dot.userData = { mediaType: mediaKey };
+                    dot.position.set((Math.random() - 0.5) * 9, yPos + 0.55, (Math.random() - 0.5) * 9);
+                    dot.userData = { fovType: randomFovKey };
                     dot.renderOrder = 2;
                     mediaDots.push(dot);
                     scene.add(dot);
                 }
-                levels.push({ slab, media: mediaDots });
+                
+                const roomLabels = [
+                    createLabel('Room ' + (i * 2 + 1), new THREE.Vector3(-3, yPos + 1, 3)),
+                    createLabel('Room ' + (i * 2 + 2), new THREE.Vector3(3, yPos + 1, -3))
+                ];
+                roomLabels.forEach(label => scene.add(label));
+
+                levels.push({ slab, media: mediaDots, labels: roomLabels });
             }
 
             const totalHeight = count * spacing;
@@ -548,8 +598,14 @@
             exteriorShell.position.y = (totalHeight / 2) - (spacing / 2);
             exteriorShell.renderOrder = 99;
             scene.add(exteriorShell);
+
+            const buildingLabel = createLabel('Main Building', new THREE.Vector3(0, totalHeight + 1, 0));
+            const parkingLabel = createLabel('Parking', new THREE.Vector3(15, 0, 15));
+            const poolLabel = createLabel('Pool', new THREE.Vector3(-15, 0, -10));
+            exteriorLabels.push(buildingLabel, parkingLabel, poolLabel);
+            exteriorLabels.forEach(label => scene.add(label));
             
-            const groundGeometry = new THREE.PlaneGeometry(30, 30);
+            const groundGeometry = new THREE.PlaneGeometry(50, 50);
             const groundMaterial = new THREE.MeshStandardMaterial({
                  color: 0x336633, 
                  side: THREE.DoubleSide
@@ -568,7 +624,6 @@
             });
 
             document.querySelector('#time-panel .panel-header').addEventListener('click', (e) => {
-                // Do not toggle if the click was on the age selector or the timelapse button
                 if (e.target.closest('.age-by-selector') || e.target.closest('#timelapse-btn')) {
                     return;
                 }
@@ -592,12 +647,14 @@
             });
 
             const filterList = document.getElementById('media-filter-list');
-            for (const key in mediaTypes) {
+            filterList.innerHTML = ''; // Clear existing items
+            for (const key in fieldOfViewItems) {
+                const item = fieldOfViewItems[key];
                 const li = document.createElement('li');
                 const swatch = document.createElement('div');
                 swatch.className = 'color-swatch';
-                swatch.style.backgroundColor = `#${mediaTypes[key].color.toString(16).padStart(6,'0')}`;
-                li.innerHTML = `<input type="checkbox" id="filter-${key}" data-type="${key}" checked> ${swatch.outerHTML} <label for="filter-${key}">${mediaTypes[key].label}</label>`;
+                swatch.style.backgroundColor = `#${item.color.toString(16).padStart(6,'0')}`;
+                li.innerHTML = `<input type="checkbox" id="filter-${key}" data-type="${key}" checked> ${swatch.outerHTML} <label for="filter-${key}">${item.label}</label>`;
                 filterList.appendChild(li);
             }
             filterList.addEventListener('change', updateMediaVisibility);
@@ -691,14 +748,21 @@
         function updateLevelSelection(selectedIndex) {
             activeLevelIndex = selectedIndex;
             const isExteriorView = activeLevelIndex === -1;
+            
             document.querySelectorAll('#level-list li').forEach(li => {
                 li.classList.toggle('active', parseInt(li.dataset.index) === activeLevelIndex);
             });
+
+            exteriorLabels.forEach(label => label.visible = isExteriorView);
             exteriorShell.visible = isExteriorView;
             groundPlane.visible = isExteriorView;
+            
             levels.forEach((level, i) => {
-                level.slab.visible = isExteriorView || (i === activeLevelIndex);
+                const isLevelVisible = isExteriorView || (i === activeLevelIndex);
+                level.slab.visible = isLevelVisible;
+                level.labels.forEach(label => label.visible = (i === activeLevelIndex));
             });
+
             updateMediaVisibility();
         }
 
@@ -711,7 +775,7 @@
             levels.forEach((level, i) => {
                 const isLevelVisible = isExteriorView || (i === activeLevelIndex);
                 level.media.forEach(dot => {
-                    dot.visible = isLevelVisible && visibleTypes.has(dot.userData.mediaType);
+                    dot.visible = isLevelVisible && visibleTypes.has(dot.userData.fovType);
                 });
             });
         }
@@ -757,40 +821,27 @@
             requestAnimationFrame(animate);
             TWEEN.update(time);
 
-            const canvas = renderer.domElement;
-            renderer.setScissorTest(false);
-            renderer.setViewport(0, 0, canvas.clientWidth, canvas.clientHeight);
+            const currentCamera = isObserverView ? observerCamera : viewfinderCamera;
 
             if (isObserverView) {
                 controls.update();
-                renderer.render(scene, observerCamera);
             } else {
                 viewfinderControls.update();
-                
-                const targetAspect = 16 / 9;
-                
-                let newWidth = canvas.clientWidth;
-                let newHeight = newWidth / targetAspect;
-
-                if (newHeight > canvas.clientHeight) {
-                    newHeight = canvas.clientHeight;
-                    newWidth = newHeight * targetAspect;
-                }
-                
-                const x = (canvas.clientWidth - newWidth) / 2;
-                const y = (canvas.clientHeight - newHeight) / 2;
-                
-                renderer.setScissorTest(true);
-                renderer.setViewport(x, y, newWidth, newHeight);
-                renderer.setScissor(x, y, newWidth, newHeight);
-                renderer.render(scene, viewfinderCamera);
             }
+            
+            renderer.render(scene, currentCamera);
+            labelRenderer.render(scene, currentCamera);
         }
         
         window.addEventListener('resize', () => {
-            observerCamera.aspect = window.innerWidth / window.innerHeight;
+            const w = window.innerWidth;
+            const h = window.innerHeight;
+
+            observerCamera.aspect = w / h;
             observerCamera.updateProjectionMatrix();
-            renderer.setSize(window.innerWidth, window.innerHeight);
+
+            renderer.setSize(w, h);
+            labelRenderer.setSize(w, h);
         });
 
         initScene();
